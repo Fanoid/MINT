@@ -362,8 +362,14 @@ function ContextViewer(text, data) {
         currentSelected.attr('stroke', null).attr('stroke-width', null);
       }
       if (d === null) {
-        text.text('');
+        text
+          .style('color', 'var(--text-muted)')
+          .style('font-style', 'italic')
+          .text('Hover over or click an allocation to view details');
       } else {
+        text
+          .style('color', null)
+          .style('font-style', null);
         const dd = d.datum();
         if (dd.elem === 'summarized') {
           text.html(
@@ -445,25 +451,45 @@ function MiniMap(miniSvg, plot, data, leftPad, width, height = 70) {
 function Legend(plotSvg, categories) {
   const xstart = 100;
   const ystart = 5;
-  plotSvg
-    .append('g')
-    .selectAll('rect')
+  const legendGroup = plotSvg;
+
+  // Semi-transparent background panel
+  const bgPadding = 6;
+  const itemHeight = 15;
+  const maxTextWidth = Math.max(...categories.map(c => c.length)) * 6 + 30;
+  legendGroup
+    .append('rect')
+    .attr('x', xstart - bgPadding)
+    .attr('y', ystart - bgPadding)
+    .attr('width', maxTextWidth + bgPadding * 2)
+    .attr('height', categories.length * itemHeight + bgPadding * 2)
+    .attr('fill', 'rgba(15, 17, 23, 0.75)')
+    .attr('stroke', 'rgba(255, 255, 255, 0.08)')
+    .attr('stroke-width', 0.5)
+    .attr('rx', 4)
+    .attr('ry', 4);
+
+  legendGroup
+    .selectAll('rect.legend-swatch')
     .data(categories)
     .enter()
     .append('rect')
+    .attr('class', 'legend-swatch')
     .attr('x', () => xstart)
-    .attr('y', (c, i) => ystart + i * 15)
+    .attr('y', (c, i) => ystart + i * itemHeight)
     .attr('width', 10)
     .attr('height', 10)
+    .attr('rx', 2)
+    .attr('ry', 2)
     .attr('fill', (c, i) => schemeTableau10[i % schemeTableau10.length]);
-  plotSvg
-    .append('g')
-    .selectAll('text')
+  legendGroup
+    .selectAll('text.legend-label')
     .data(categories)
     .enter()
     .append('text')
-    .attr('x', () => xstart + 20)
-    .attr('y', (c, i) => ystart + i * 15 + 8)
+    .attr('class', 'legend-label')
+    .attr('x', () => xstart + 16)
+    .attr('y', (c, i) => ystart + i * itemHeight + 8)
     .attr('font-family', '-apple-system, BlinkMacSystemFont, Inter, sans-serif')
     .attr('font-size', 10)
     .attr('fill', '#9aa0b0')
@@ -532,6 +558,11 @@ export function createTraceView(
   const contextDiv = gridContainer
     .append('div')
     .attr('class', 'trace-context-panel');
-  const delegate = ContextViewer(contextDiv.append('pre').text('none'), data);
+  const contextPre = contextDiv.append('pre');
+  contextPre
+    .style('color', 'var(--text-muted)')
+    .style('font-style', 'italic')
+    .text('Hover over or click an allocation to view details');
+  const delegate = ContextViewer(contextPre, data);
   plot.set_delegate(delegate);
 }
