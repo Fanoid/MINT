@@ -7,7 +7,7 @@ import { getTraceInteractionMode } from '../core/index.js';
 export function StackInfo(outer) {
   const stackTrace = outer
     .append('pre')
-    .attr('style', 'grid-column: 1 / 3; grid-row: 2; overflow: auto');
+    .attr('class', 'segment-stack-panel');
 
   let selected = {
     enter: () => {

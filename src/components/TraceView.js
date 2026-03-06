@@ -278,7 +278,7 @@ function MemoryPlot(svg, data, leftPad, width, height, colors = schemeTableau10)
       .attr('y', 0)
       .attr('width', plotWidth)
       .attr('height', plotHeight)
-      .attr('fill', 'white');
+      .attr('fill', '#232735');
   }
 
   viewRect(plotOuter);
@@ -373,8 +373,8 @@ function ContextViewer(text, data) {
         } else {
           text.text(`${dd.elem} ${data.context_for_id(dd.elem)}`);
         }
-        d.attr('stroke', 'black')
-          .attr('stroke-width', 1)
+        d.attr('stroke', '#6c8cff')
+          .attr('stroke-width', 2)
           .attr('vector-effect', 'non-scaling-stroke');
       }
       currentSelected = d;
@@ -464,8 +464,9 @@ function Legend(plotSvg, categories) {
     .append('text')
     .attr('x', () => xstart + 20)
     .attr('y', (c, i) => ystart + i * 15 + 8)
-    .attr('font-family', 'helvetica')
+    .attr('font-family', '-apple-system, BlinkMacSystemFont, Inter, sans-serif')
     .attr('font-size', 10)
+    .attr('fill', '#9aa0b0')
     .text((c) => c);
   return {};
 }
@@ -486,7 +487,7 @@ export function createTraceView(
   dst.selectAll('div').remove();
 
   maxEntries = Math.min(maxEntries, data.elements_length);
-  const d = dst.append('div');
+  const d = dst.append('div').attr('class', 'trace-detail-controls');
   d.append('input')
     .attr('type', 'range')
     .attr('min', 0)
@@ -501,38 +502,36 @@ export function createTraceView(
 
   const gridContainer = dst
     .append('div')
-    .attr(
-      'style',
-      'display: grid; grid-template-columns: 1fr; grid-template-rows: 10fr 1fr 8fr; flex: 1; min-height: 0; gap: 10px',
-    );
+    .attr('class', 'trace-view-grid');
 
-  const plotSvg = gridContainer
+  const plotContainer = gridContainer
+    .append('div')
+    .attr('class', 'trace-plot-container');
+  const plotSvg = plotContainer
     .append('svg')
     .attr('display', 'block')
     .attr('viewBox', '0 0 1024 576')
-    .attr('preserveAspectRatio', 'none')
-    .attr('style', 'grid-column: 1; grid-row: 1; width: 100%; height: 100%;');
+    .attr('preserveAspectRatio', 'none');
 
   const plot = MemoryPlot(plotSvg, data, leftPad, 1024, 576);
 
   if (snapshot.categories.length !== 0) {
-    Legend(plotSvg.append('g'), snapshot.categories);
+    Legend(plotSvg.append('g').attr('class', 'trace-legend'), snapshot.categories);
   }
 
-  const miniSvg = gridContainer
+  const minimapContainer = gridContainer
+    .append('div')
+    .attr('class', 'trace-minimap-container');
+  const miniSvg = minimapContainer
     .append('svg')
     .attr('display', 'block')
     .attr('viewBox', '0 0 1024 60')
-    .attr('preserveAspectRatio', 'none')
-    .attr('style', 'grid-column: 1; grid-row: 2; width: 100%; height: 100%;');
+    .attr('preserveAspectRatio', 'none');
 
   MiniMap(miniSvg, plot, data, leftPad, 1024);
   const contextDiv = gridContainer
     .append('div')
-    .attr(
-      'style',
-      'grid-column: 1; grid-row: 3; width: 100%; height: 100%; min-height: 0; overflow: auto;',
-    );
+    .attr('class', 'trace-context-panel');
   const delegate = ContextViewer(contextDiv.append('pre').text('none'), data);
   plot.set_delegate(delegate);
 }

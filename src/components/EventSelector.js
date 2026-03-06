@@ -12,18 +12,14 @@ import {
 export function EventSelector(outer, events, stackInfo, memoryView) {
   const eventsDiv = outer
     .append('div')
-    .attr(
-      'style',
-      'grid-column: 1; grid-row: 1; overflow: auto; font-family: monospace',
-    );
+    .attr('class', 'segment-events-panel');
 
   const eventsSelection = eventsDiv
     .selectAll('pre')
     .data(events)
     .enter()
     .append('pre')
-    .text((e) => formatEvent(e))
-    .attr('style', '');
+    .text((e) => formatEvent(e));
 
   let selectedEventIdx = null;
 
@@ -33,11 +29,11 @@ export function EventSelector(outer, events, stackInfo, memoryView) {
         const selectedEvent = d3.select(
           eventsDiv.node().children[selectedEventIdx],
         );
-        selectedEvent.attr('style', '');
+        selectedEvent.classed('event-selected', false);
       }
       if (idx !== null) {
         const div = d3.select(eventsDiv.node().children[idx]);
-        div.attr('style', `background-color: ${schemeTableau10[5]}`);
+        div.classed('event-selected', true);
         const [reserved, allocated] = memoryView.draw(idx);
         const enter = () => eventStack(div.datum(), allocated, reserved);
         stackInfo.highlight(enter);

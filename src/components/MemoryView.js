@@ -19,7 +19,7 @@ import {
 export function MemoryView(outer, stackInfo, snapshot, device) {
   const svg = outer
     .append('svg')
-    .attr('style', 'grid-column: 2; grid-row: 1; width: 100%; height: 100%;')
+    .attr('class', 'segment-memory-panel')
     .attr('viewBox', '0 0 200 100')
     .attr('preserveAspectRatio', 'xMinYMin meet');
   const g = svg.append('g');
@@ -265,10 +265,10 @@ export function MemoryView(outer, stackInfo, snapshot, device) {
         .attr('y', (x) => yScale(x.row))
         .attr('width', (x) => xScale(x.size))
         .attr('height', yScale(4 / 5))
-        .attr('stroke', 'black')
+        .attr('stroke', 'rgba(255, 255, 255, 0.18)')
         .attr('stroke-width', '1')
         .attr('vector-effect', 'non-scaling-stroke')
-        .attr('fill', 'white');
+        .attr('fill', '#232735');
 
       stackInfo.register(
         segmentsSelection,
@@ -296,7 +296,7 @@ export function MemoryView(outer, stackInfo, snapshot, device) {
           );
         },
         (d) => {
-          d.attr('stroke', 'black')
+          d.attr('stroke', 'rgba(255, 255, 255, 0.18)')
             .attr('stroke-width', '1')
             .attr('vector-effect', 'non-scaling-stroke');
         },
@@ -338,7 +338,7 @@ export function MemoryView(outer, stackInfo, snapshot, device) {
         .attr('height', yScale(4 / 5))
         .attr('fill', (x, _i) =>
           x.free_requested
-            ? 'red'
+            ? '#f87171'
             : schemeTableau10[Math.abs(hashCode(x.addr)) % schemeTableau10.length],
         );
 
@@ -380,7 +380,7 @@ export function MemoryView(outer, stackInfo, snapshot, device) {
         .attr('y', (x) => yScale(x.segment.row))
         .attr('width', (x) => xScale(x.size - x.requested_size))
         .attr('height', yScale(4 / 5))
-        .attr('fill', (_x, _i) => 'red');
+.attr('fill', (_x, _i) => '#f87171');
 
       stackInfo.register(
         freeSelection,

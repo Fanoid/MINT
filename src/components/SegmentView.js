@@ -9,10 +9,7 @@ import { StackInfo } from './StackInfo.js';
 export function createSegmentView(dst, snapshot, device) {
   const outer = dst
     .append('div')
-    .attr(
-      'style',
-      'display: grid; grid-template-columns: 1fr 2fr; grid-template-rows: 2fr 1fr; height: 100%; gap: 10px',
-    );
+    .attr('class', 'segment-view-grid');
 
   const events = snapshot.device_traces[device];
   const stackInfo = StackInfo(outer);

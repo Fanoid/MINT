@@ -97,7 +97,7 @@ export function hashCode(num) {
  * Add stroke highlight to selection
  */
 export function addStroke(d) {
-  d.attr('stroke', 'red')
+  d.attr('stroke', '#fbbf24')
     .attr('stroke-width', '2')
     .attr('vector-effect', 'non-scaling-stroke');
 }
