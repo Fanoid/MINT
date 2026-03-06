@@ -1,0 +1,6 @@
+.idea/
+.codebuddy/
+*.png
+*.pickle
+__pycache__/
+*.pyc
