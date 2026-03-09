@@ -519,18 +519,34 @@ export function createTraceView(
   dst.selectAll('div').remove();
 
   maxEntries = Math.min(maxEntries, data.elements_length);
+  const totalEntries = data.elements_length;
   const d = dst.append('div').attr('class', 'trace-detail-controls');
+  // Use the widest possible text to measure and lock the label width,
+  // preventing layout shift (slider jitter) when digit count changes.
+  const maxLabelText = `Detail: ${totalEntries} of ${totalEntries} entries`;
+  const detailLabel = d.append('label').text(
+    `Detail: ${maxEntries} of ${totalEntries} entries`,
+  );
+  // Measure the rendered width of the widest label text, then fix it
+  detailLabel.text(maxLabelText);
+  const fixedWidth = detailLabel.node().getBoundingClientRect().width;
+  detailLabel
+    .style('min-width', `${Math.ceil(fixedWidth)}px`)
+    .text(`Detail: ${maxEntries} of ${totalEntries} entries`);
   d.append('input')
     .attr('type', 'range')
-    .attr('min', 0)
-    .attr('max', data.elements_length)
+    .attr('min', 1)
+    .attr('max', totalEntries)
     .attr('value', maxEntries)
+    .on('input', function () {
+      // Update label text in real-time during drag (no rebuild)
+      detailLabel.text(
+        `Detail: ${this.value} of ${totalEntries} entries`,
+      );
+    })
     .on('change', function () {
       createTraceView(dst, snapshot, device, plotSegments, this.value);
     });
-  d.append('label').text(
-    `Detail: ${maxEntries} of ${data.elements_length} entries`,
-  );
 
   const gridContainer = dst
     .append('div')

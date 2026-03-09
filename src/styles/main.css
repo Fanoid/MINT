@@ -615,6 +615,8 @@ input[type='file'] {
   font-variant-numeric: tabular-nums;
   font-family: 'JetBrains Mono', 'SF Mono', 'Monaco', monospace;
   white-space: nowrap;
+  display: inline-flex;
+  justify-content: center;
   padding: 3px 10px;
   background: var(--bg-tertiary);
   border-radius: var(--radius-sm);
