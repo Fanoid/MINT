@@ -441,6 +441,12 @@ function MiniMap(miniSvg, plot, data, leftPad, width, height = 70) {
     }
     plot.select_window(stepbegin, stepend, max);
   });
+  brush.on('end', function (event) {
+    // When brush is cleared (e.g. single click), reset to full range
+    if (event.selection === null) {
+      plot.select_window(0, maxAtTime.length, data.max_size);
+    }
+  });
   miniSvg.call(brush);
   return {};
 }
