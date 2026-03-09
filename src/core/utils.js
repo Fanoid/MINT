@@ -261,3 +261,28 @@ export function Segment(addr, size, stream, frames, version, user_metadata) {
 export function Block(addr, size, requested_size, frames, free_requested, version, user_metadata) {
   return { addr, size, requested_size, frames, free_requested, version, user_metadata };
 }
+
+/**
+ * Classify a frame as Python based on filename heuristic.
+ * A frame is Python if its filename ends with .py or .pyx.
+ */
+export function isPythonFrame(frame) {
+  if (!frame || !frame.filename) return false;
+  return frame.filename.endsWith('.py') || frame.filename.endsWith('.pyx');
+}
+
+/**
+ * Classify a frame as unknown (no debug info).
+ * These frames typically show as "??:0:unknown_function".
+ */
+export function isUnknownFrame(frame) {
+  if (!frame || !frame.filename) return false;
+  return frame.filename === '??' || frame.filename === '??';
+}
+
+/**
+ * Classify a frame as C++ (not Python and not unknown).
+ */
+export function isCppFrame(frame) {
+  return !isPythonFrame(frame) && !isUnknownFrame(frame);
+}

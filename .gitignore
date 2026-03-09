@@ -6,6 +6,8 @@ dist/
 
 # Screenshots (large image files)
 screenshots/
+test_screenshots/
+*.png
 
 # TODO files
 TODO*.md
