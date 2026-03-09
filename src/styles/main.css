@@ -393,58 +393,6 @@ pre {
 }
 
 /* ==================
-   Trace View Layout
-   ================== */
-.trace-grid {
-  display: grid;
-  grid-template-columns: 1fr;
-  grid-template-rows: 10fr 1fr 8fr;
-  flex: 1;
-  min-height: 0;
-  gap: 2px;
-  background: var(--bg-primary);
-}
-
-.trace-plot {
-  background: var(--bg-secondary);
-  border-radius: 0;
-}
-
-.trace-minimap {
-  background: var(--bg-secondary);
-}
-
-.trace-context {
-  background: var(--bg-secondary);
-  padding: 12px 16px;
-  overflow: auto;
-  border-top: 1px solid var(--border-subtle);
-}
-
-.trace-context pre {
-  color: var(--text-secondary);
-}
-
-.trace-controls {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  padding: 8px 16px;
-  background: var(--bg-secondary);
-  border-bottom: 1px solid var(--border-subtle);
-}
-
-.trace-controls label {
-  font-size: 12px;
-  color: var(--text-muted);
-  font-variant-numeric: tabular-nums;
-}
-
-.trace-controls input[type='range'] {
-  width: 200px;
-}
-
-/* ==================
    Segment View Layout
    ================== */
 .segment-grid {
