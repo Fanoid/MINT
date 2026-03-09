@@ -1,8 +1,8 @@
 # 🌿 MINT — Modern Memory Insight Tool
 
-An interactive visualization tool for GPU memory snapshots, built with D3.js and Vite.
+**MINT** (**M**odern Memory **In**sight **T**ool) is an interactive visualization tool for GPU memory snapshots, built with D3.js and Vite. It helps you understand and analyze GPU memory usage by visualizing memory snapshots captured from [PyTorch training processes](https://pytorch.org/blog/understanding-gpu-memory-1/).
 
-MINT helps you understand and analyze GPU memory usage by visualizing memory snapshots captured from PyTorch training processes.
+Inspired by and built upon [PyTorch Memory Viz](https://docs.pytorch.org/memory_viz), MINT serves as a **drop-in replacement** with enhanced interactivity and a modernized tech stack.
 
 ## Features
 
@@ -13,6 +13,12 @@ MINT helps you understand and analyze GPU memory usage by visualizing memory sna
 - **Pickle Snapshot Support** — Load PyTorch memory snapshots directly in the browser
 
 ## Getting Started
+
+Visit [https://fanoid.github.io/MINT/](https://fanoid.github.io/MINT/) and upload your profiler snapshot file directly — no installation needed.
+
+Or, to run locally, see the [Development](#development) section below.
+
+## Development
 
 ### Prerequisites
 
@@ -26,7 +32,7 @@ cd MINT
 npm install
 ```
 
-### Development
+### Dev Server
 
 ```bash
 npm run dev
@@ -40,13 +46,6 @@ Open [http://localhost:3000](http://localhost:3000) in your browser.
 npm run build
 npm run preview
 ```
-
-## Usage
-
-1. Place your PyTorch memory snapshot file (`.pickle`) in the `public/` directory
-2. Start the dev server with `npm run dev`
-3. Load the snapshot file from the UI
-4. Switch between different views to analyze memory usage
 
 ## License
 
