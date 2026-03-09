@@ -1,5 +1,5 @@
 import './styles/main.css';
-import { initApp, addRemoteFiles, addLocalFiles, setTraceInteractionMode, getTraceInteractionMode } from './app.js';
+import { initApp, addRemoteFiles, addLocalFiles } from './app.js';
 
 // Initialize the application when DOM is ready
 document.addEventListener('DOMContentLoaded', () => {
@@ -7,4 +7,4 @@ document.addEventListener('DOMContentLoaded', () => {
 });
 
 // Export functions for external use
-export { addRemoteFiles, addLocalFiles, setTraceInteractionMode, getTraceInteractionMode };
+export { addRemoteFiles, addLocalFiles };

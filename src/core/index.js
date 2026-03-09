@@ -1,7 +1,5 @@
 export { schemeTableau10, VIEW_KINDS } from './constants.js';
 export {
-  setTraceInteractionMode,
-  getTraceInteractionMode,
   formatSize,
   formatAddr,
   formatEvent,

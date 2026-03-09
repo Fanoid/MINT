@@ -1,7 +1,5 @@
 import * as d3 from 'd3';
 import {
-  setTraceInteractionMode,
-  getTraceInteractionMode,
   unpickle,
   decodeBase64,
   annotateSnapshot,
@@ -175,23 +173,6 @@ export function initApp() {
   gpuGroup.append('span').attr('class', 'toolbar-label').text('GPU');
   const gpu = gpuGroup.append('select');
 
-  toolbar.append('div').attr('class', 'toolbar-divider');
-
-  // Interaction mode toggle
-  const interactionLabel = toolbar.append('label');
-  const interactionCheckbox = interactionLabel.append('input')
-    .attr('type', 'checkbox')
-    .attr('id', 'interaction-mode-toggle');
-  interactionLabel.append('span').text('Click mode');
-
-  interactionCheckbox.on('change', function() {
-    const mode = this.checked ? 'click' : 'hover';
-    setTraceInteractionMode(mode);
-    if (snapshotSelect.node().value) {
-      selectedChange(snapshotSelect, view, gpu, body);
-    }
-  });
-
   // File open button
   const fileInput = body.append('input')
     .attr('type', 'file')
@@ -315,5 +296,4 @@ export function addLocalFiles(files, viewValue) {
   }
 }
 
-// Export configuration functions
-export { setTraceInteractionMode, getTraceInteractionMode };
+

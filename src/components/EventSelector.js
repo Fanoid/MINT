@@ -3,7 +3,6 @@ import {
   schemeTableau10,
   formatEvent,
   eventStack,
-  getTraceInteractionMode,
 } from '../core/index.js';
 
 /**

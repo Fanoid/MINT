@@ -6,7 +6,6 @@ import {
   formatFrames,
   formatForwardFrames,
   formatUserMetadata,
-  getTraceInteractionMode,
 } from '../core/index.js';
 
 /**
@@ -328,23 +327,16 @@ function MemoryPlot(svg, data, leftPad, width, height, colors = schemeTableau10)
       );
     },
     set_delegate: (delegate) => {
-      if (getTraceInteractionMode() === 'hover') {
-        plot
-          .on('mouseover', function () {
-            delegate.set_selected(d3.select(this));
-          })
-          .on('mousedown', function () {
-            delegate.default_selected = d3.select(this);
-          })
-          .on('mouseleave', function () {
-            delegate.set_selected(delegate.default_selected);
-          });
-      } else {
-        plot.on('click', function () {
-          delegate.default_selected = d3.select(this);
+      plot
+        .on('mouseover', function () {
           delegate.set_selected(d3.select(this));
+        })
+        .on('mousedown', function () {
+          delegate.default_selected = d3.select(this);
+        })
+        .on('mouseleave', function () {
+          delegate.set_selected(delegate.default_selected);
         });
-      }
     },
   };
 }

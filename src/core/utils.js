@@ -1,23 +1,6 @@
 import * as d3 from 'd3';
 
 /**
- * Global configuration for trace interaction mode
- * 'hover' = show trace on hover (default)
- * 'click' = show trace on click
- */
-let traceInteractionMode = 'hover';
-
-export function setTraceInteractionMode(mode) {
-  if (mode === 'click' || mode === 'hover') {
-    traceInteractionMode = mode;
-  }
-}
-
-export function getTraceInteractionMode() {
-  return traceInteractionMode;
-}
-
-/**
  * Format size in human-readable format
  */
 export function formatSize(num, showBytes = true) {
