@@ -1,11 +1,24 @@
-.idea/
-.codebuddy/
-*.png
-*.pickle
-__pycache__/
-*.pyc
-
-# Node.js
+# Dependencies
 node_modules/
+
+# Build output
 dist/
-package-lock.json
+
+# Screenshots (large image files)
+screenshots/
+
+# TODO files
+TODO*.md
+
+# Data files
+*.pickle
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
