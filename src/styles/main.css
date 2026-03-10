@@ -582,6 +582,7 @@ input[type='file'] {
 }
 
 .trace-plot-container {
+  position: relative;
   background: var(--bg-secondary);
   border-radius: 0;
   overflow: hidden;
@@ -590,6 +591,10 @@ input[type='file'] {
 .trace-plot-container svg {
   width: 100%;
   height: 100%;
+}
+
+.trace-plot-container canvas {
+  cursor: crosshair;
 }
 
 .trace-minimap-container {

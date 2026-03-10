@@ -304,105 +304,465 @@ function processAllocData(snapshot, device, plotSegments, maxEntries) {
 }
 
 /**
- * MemoryPlot component for rendering allocation timeline
+ * MemoryPlot — Canvas 2D implementation (replaces SVG).
+ *
+ * Architecture:
+ *   - Main canvas: renders allocation polygons
+ *   - Hit canvas: off-screen, each polygon painted with a unique RGB color for O(1) pick
+ *   - Highlight canvas: on-screen overlay for selection highlight stroke
+ *   - SVG overlay: Y-axis + Legend (cheap DOM, reuses d3.axisLeft)
+ *
+ * @returns {{ redraw, select_window, set_delegate, resize, getDataAtPixel }}
  */
-function MemoryPlot(svg, data, leftPad, width, height, colors = schemeTableau10) {
-  function formatPoints(d) {
-    const size = d.size;
-    const xs = d.timesteps.map((t) => xScale(t));
-    const bottom = d.offsets.map((t) => yScale(t));
-    const m = Array.isArray(size)
-      ? (t, i) => yScale(t + size[i])
-      : (t) => yScale(t + size);
-    const top = d.offsets.map(m);
-    const p0 = xs.map((x, i) => `${x},${bottom[i]}`);
-    const p1 = xs.map((x, i) => `${x},${top[i]}`).reverse();
-    return `${p0.join(' ')} ${p1.join(' ')}`;
-  }
-
+function MemoryPlot(container, data, leftPad, colors = schemeTableau10) {
+  const allocations = data.allocations_over_time;
   const maxTimestep = data.max_at_time.length;
   const maxSize = data.max_size;
 
-  const plotWidth = width - leftPad;
-  const plotHeight = height;
+  // ---- Scales (pixel ranges updated on resize) ----
+  const xScale = d3.scaleLinear().domain([0, maxTimestep]);
+  const yScale = d3.scaleLinear().domain([0, maxSize]);
 
-  const yScale = d3.scaleLinear().domain([0, maxSize]).range([plotHeight, 0]);
-  const yaxis = d3.axisLeft(yScale).tickFormat((d) => formatSize(d, false));
-  const xScale = d3.scaleLinear().domain([0, maxTimestep]).range([0, plotWidth]);
+  // ---- DOM setup ----
+  // Wrapper that holds all layers
+  const wrapper = document.createElement('div');
+  wrapper.style.cssText = 'position:relative;width:100%;height:100%;overflow:hidden;';
+  container.appendChild(wrapper);
 
-  const plotCoordinateSpace = svg
-    .append('g')
-    .attr('transform', `translate(${leftPad}, ${0})`);
-  const plotOuter = plotCoordinateSpace.append('g');
+  // Main canvas (data polygons)
+  const mainCanvas = document.createElement('canvas');
+  mainCanvas.style.cssText = `position:absolute;top:0;left:${leftPad}px;`;
+  wrapper.appendChild(mainCanvas);
+  const mainCtx = mainCanvas.getContext('2d');
 
-  function viewRect(a) {
-    return a
-      .append('rect')
-      .attr('x', 0)
-      .attr('y', 0)
-      .attr('width', plotWidth)
-      .attr('height', plotHeight)
-      .attr('fill', '#232735');
+  // Highlight canvas (selection overlay)
+  const hlCanvas = document.createElement('canvas');
+  hlCanvas.style.cssText = `position:absolute;top:0;left:${leftPad}px;pointer-events:none;`;
+  wrapper.appendChild(hlCanvas);
+  const hlCtx = hlCanvas.getContext('2d');
+
+  // Hit canvas (off-screen, for color-coded picking)
+  const hitCanvas = document.createElement('canvas');
+  const hitCtx = hitCanvas.getContext('2d', { willReadFrequently: true });
+
+  // SVG overlay for Y-axis (positioned at left:0)
+  const axisSvg = d3
+    .select(wrapper)
+    .append('svg')
+    .style('position', 'absolute')
+    .style('top', '0')
+    .style('left', '0')
+    .style('pointer-events', 'none')
+    .style('overflow', 'visible');
+
+  const axisGroup = axisSvg.append('g').attr('transform', `translate(${leftPad}, 0)`);
+  const yAxis = d3.axisLeft(yScale).tickFormat((d) => formatSize(d, false));
+
+  // ---- Hit-canvas color encoding ----
+  // Allocation index → unique RGB color. Index 0 → rgb(0,0,1), etc.
+  // Background is rgb(0,0,0) → means "no allocation".
+  function indexToColor(i) {
+    const id = i + 1; // reserve 0 for background
+    const r = (id >> 16) & 0xff;
+    const g = (id >> 8) & 0xff;
+    const b = id & 0xff;
+    return `rgb(${r},${g},${b})`;
   }
 
-  viewRect(plotOuter);
-
-  const cp = svg.append('clipPath').attr('id', 'clip');
-  viewRect(cp);
-  plotOuter.attr('clip-path', 'url(#clip)');
-
-  const zoomGroup = plotOuter.append('g');
-  const scrubGroup = zoomGroup.append('g');
-
-  const plot = scrubGroup
-    .selectAll('polygon')
-    .data(data.allocations_over_time)
-    .enter()
-    .append('polygon')
-    .attr('points', formatPoints)
-    .attr('fill', (d) => colors[d.color % colors.length]);
-
-  const axis = plotCoordinateSpace.append('g').call(yaxis);
-
-  function handleZoom(event) {
-    const t = event.transform;
-    zoomGroup.attr('transform', t);
-    axis.call(yaxis.scale(event.transform.rescaleY(yScale)));
+  function colorToIndex(r, g, b) {
+    if (r === 0 && g === 0 && b === 0) return -1; // background
+    return ((r << 16) | (g << 8) | b) - 1;
   }
 
-  const theZoom = d3.zoom().on('zoom', handleZoom);
-  plotOuter.call(theZoom);
+  // ---- Precompute polygon path data for each allocation ----
+  // Each allocation has { xs: number[], bottomYs: number[], topYs: number[] }
+  // in data-space coordinates. We transform to pixel space during draw.
+  function buildPathForAlloc(d) {
+    const size = d.size;
+    const xs = d.timesteps;
+    const bottomYs = d.offsets;
+    const topYs = Array.isArray(size)
+      ? d.offsets.map((o, i) => o + size[i])
+      : d.offsets.map((o) => o + size);
+    return { xs, bottomYs, topYs };
+  }
+
+  const pathCache = allocations.map(buildPathForAlloc);
+
+  // ---- Offscreen canvases for O(1) zoom (pre-rendered bitmaps) ----
+  const offMainCanvas = document.createElement('canvas');
+  const offMainCtx = offMainCanvas.getContext('2d');
+  const offHitCanvas = document.createElement('canvas');
+  const offHitCtx = offHitCanvas.getContext('2d', { willReadFrequently: true });
+
+  // ---- Current transform state (from d3.zoom and minimap brush) ----
+  let currentTransform = d3.zoomIdentity;
+  // Minimap scrub state: [xBegin, xEnd] in data-space and the max Y for that range
+  let scrubXBegin = 0;
+  let scrubXEnd = maxTimestep;
+  let scrubYMax = maxSize;
+
+  // Dirty flag: true when offscreen bitmaps are stale (need vector redraw)
+  let offscreenDirty = true;
+  // Debounce timer for deferred vector re-render after zoom
+  let vectorRedrawTimer = null;
+  // rAF handle for zoom throttling
+  let zoomRafId = null;
+
+  // ---- Effective scales (incorporating zoom + scrub) ----
+  function effectiveXScale() {
+    // Scrub selects a data-space x range; zoom further transforms it
+    const scrubScale = d3
+      .scaleLinear()
+      .domain([scrubXBegin, scrubXEnd])
+      .range(xScale.range());
+    return currentTransform.rescaleX(scrubScale);
+  }
+
+  function effectiveYScale() {
+    const s = d3.scaleLinear().domain([0, scrubYMax]).range(yScale.range());
+    return currentTransform.rescaleY(s);
+  }
+
+  // ---- Drawing ----
+  function drawPolygon(ctx, pathData, ex, ey) {
+    const { xs, bottomYs, topYs } = pathData;
+    const n = xs.length;
+    if (n === 0) return;
+
+    ctx.beginPath();
+    // Bottom edge (left to right)
+    ctx.moveTo(ex(xs[0]), ey(bottomYs[0]));
+    for (let i = 1; i < n; i++) {
+      ctx.lineTo(ex(xs[i]), ey(bottomYs[i]));
+    }
+    // Top edge (right to left)
+    for (let i = n - 1; i >= 0; i--) {
+      ctx.lineTo(ex(xs[i]), ey(topYs[i]));
+    }
+    ctx.closePath();
+  }
+
+  /**
+   * Full vector redraw onto offscreen canvases, then blit to on-screen.
+   * Called on init, resize, select_window, and after debounced zoom.
+   */
+  function vectorRedraw() {
+    const w = mainCanvas.width;
+    const h = mainCanvas.height;
+    const dpr = window.devicePixelRatio || 1;
+
+    const ex = effectiveXScale();
+    const ey = effectiveYScale();
+
+    // Sync offscreen canvas sizes
+    offMainCanvas.width = w;
+    offMainCanvas.height = h;
+    offMainCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
+
+    offHitCanvas.width = w;
+    offHitCanvas.height = h;
+    offHitCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
+
+    // --- Offscreen main canvas ---
+    offMainCtx.clearRect(0, 0, w, h);
+    for (let i = 0; i < allocations.length; i++) {
+      const d = allocations[i];
+      const color = colors[d.color % colors.length];
+      drawPolygon(offMainCtx, pathCache[i], ex, ey);
+      offMainCtx.fillStyle = color;
+      offMainCtx.fill();
+    }
+
+    // --- Offscreen hit canvas ---
+    offHitCtx.clearRect(0, 0, w, h);
+    for (let i = 0; i < allocations.length; i++) {
+      drawPolygon(offHitCtx, pathCache[i], ex, ey);
+      offHitCtx.fillStyle = indexToColor(i);
+      offHitCtx.fill();
+    }
+
+    offscreenDirty = false;
+
+    // Blit offscreen → on-screen
+    blitToScreen();
+
+    // --- Sync hit canvas (on-screen copy for pixel picking) ---
+    hitCtx.save();
+    hitCtx.setTransform(1, 0, 0, 1, 0, 0);
+    hitCtx.clearRect(0, 0, w, h);
+    hitCtx.drawImage(offHitCanvas, 0, 0);
+    hitCtx.restore();
+
+    // --- Y-axis SVG ---
+    const axisScale = d3
+      .scaleLinear()
+      .domain(ey.domain())
+      .range([h / dpr, 0]);
+    axisGroup.call(yAxis.scale(axisScale));
+
+    // --- Clear highlight ---
+    hlCtx.clearRect(0, 0, w, h);
+  }
+
+  /**
+   * Blit the pre-rendered offscreen main canvas onto the visible canvas.
+   * Uses identity transform (1:1 pixel copy) — no scaling artifacts.
+   */
+  function blitToScreen() {
+    const w = mainCanvas.width;
+    const h = mainCanvas.height;
+    mainCtx.save();
+    mainCtx.setTransform(1, 0, 0, 1, 0, 0);
+    mainCtx.clearRect(0, 0, w, h);
+    mainCtx.drawImage(offMainCanvas, 0, 0);
+    mainCtx.restore();
+  }
+
+  /**
+   * Fast zoom blit: apply d3.zoom's relative transform to the pre-rendered
+   * offscreen bitmap. This is O(1) — no polygon iteration.
+   *
+   * The key insight: the offscreen bitmap was rendered at a specific
+   * "base transform" (zoomTransformAtRender). The current zoom is
+   * currentTransform. The delta between them gives us the CSS-like
+   * translate+scale to apply via drawImage.
+   */
+  let zoomTransformAtRender = d3.zoomIdentity;
+
+  function zoomBlit() {
+    const w = mainCanvas.width;
+    const h = mainCanvas.height;
+    const dpr = window.devicePixelRatio || 1;
+
+    // Compute relative transform: current vs. the transform when offscreen was rendered
+    const base = zoomTransformAtRender;
+    const cur = currentTransform;
+    const relScale = cur.k / base.k;
+    const relX = (cur.x - base.x * relScale) * dpr;
+    const relY = (cur.y - base.y * relScale) * dpr;
+
+    mainCtx.save();
+    mainCtx.setTransform(1, 0, 0, 1, 0, 0);
+    mainCtx.clearRect(0, 0, w, h);
+    mainCtx.setTransform(relScale, 0, 0, relScale, relX, relY);
+    mainCtx.drawImage(offMainCanvas, 0, 0);
+    mainCtx.restore();
+
+    // Update Y-axis to match current zoom
+    const ey = effectiveYScale();
+    const axisScale = d3
+      .scaleLinear()
+      .domain(ey.domain())
+      .range([h / dpr, 0]);
+    axisGroup.call(yAxis.scale(axisScale));
+  }
+
+  /**
+   * Schedule a deferred full vector redraw after zoom settles.
+   * Clears any pending timer.
+   */
+  function scheduleVectorRedraw() {
+    if (vectorRedrawTimer) clearTimeout(vectorRedrawTimer);
+    vectorRedrawTimer = setTimeout(() => {
+      vectorRedrawTimer = null;
+      zoomTransformAtRender = currentTransform;
+      offscreenDirty = true;
+      vectorRedraw();
+      highlightAlloc(highlightedIndex);
+    }, 150);
+  }
+
+  // Backward-compatible alias used by resize / select_window
+  function redraw() {
+    zoomTransformAtRender = currentTransform;
+    vectorRedraw();
+  }
+
+  // ---- Highlight a single allocation ----
+  let highlightedIndex = -1;
+
+  function highlightAlloc(index) {
+    const w = hlCanvas.width;
+    const h = hlCanvas.height;
+    hlCtx.clearRect(0, 0, w, h);
+    highlightedIndex = index;
+    if (index < 0 || index >= allocations.length) return;
+
+    const ex = effectiveXScale();
+    const ey = effectiveYScale();
+    const dpr = window.devicePixelRatio || 1;
+
+    drawPolygon(hlCtx, pathCache[index], ex, ey);
+    hlCtx.strokeStyle = '#6c8cff';
+    hlCtx.lineWidth = 2 * dpr;
+    hlCtx.stroke();
+  }
+
+  // ---- Pixel → allocation lookup ----
+  function getDataAtPixel(canvasX, canvasY) {
+    // If offscreen is dirty (zoom in progress), sync hit canvas first
+    if (offscreenDirty) {
+      zoomTransformAtRender = currentTransform;
+      vectorRedraw();
+      highlightAlloc(highlightedIndex);
+    }
+    const dpr = window.devicePixelRatio || 1;
+    const px = Math.round(canvasX * dpr);
+    const py = Math.round(canvasY * dpr);
+    if (px < 0 || py < 0 || px >= hitCanvas.width || py >= hitCanvas.height) return null;
+    const pixel = hitCtx.getImageData(px, py, 1, 1).data;
+    const idx = colorToIndex(pixel[0], pixel[1], pixel[2]);
+    if (idx < 0 || idx >= allocations.length) return null;
+    return { index: idx, allocation: allocations[idx] };
+  }
+
+  // ---- Zoom (O(1) blit during interaction, deferred vector redraw) ----
+  const theZoom = d3
+    .zoom()
+    .scaleExtent([1, 100])
+    .on('zoom', (event) => {
+      currentTransform = event.transform;
+      // Throttle to one repaint per animation frame
+      if (!zoomRafId) {
+        zoomRafId = requestAnimationFrame(() => {
+          zoomRafId = null;
+          zoomBlit();               // O(1) bitmap transform
+          hlCtx.clearRect(0, 0, hlCanvas.width, hlCanvas.height); // clear stale highlight
+        });
+      }
+      // Schedule a full vector redraw after zoom settles
+      scheduleVectorRedraw();
+    });
+
+  // We attach zoom to the main canvas via d3
+  d3.select(mainCanvas).call(theZoom);
+
+  // ---- Resize ----
+  function resize() {
+    const rect = wrapper.getBoundingClientRect();
+    const plotWidth = rect.width - leftPad;
+    const plotHeight = rect.height;
+    if (plotWidth <= 0 || plotHeight <= 0) return;
+
+    const dpr = window.devicePixelRatio || 1;
+
+    // Update scale ranges
+    xScale.range([0, plotWidth]);
+    yScale.range([plotHeight, 0]);
+
+    // Main canvas
+    mainCanvas.width = Math.round(plotWidth * dpr);
+    mainCanvas.height = Math.round(plotHeight * dpr);
+    mainCanvas.style.width = `${plotWidth}px`;
+    mainCanvas.style.height = `${plotHeight}px`;
+    mainCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
+
+    // Highlight canvas
+    hlCanvas.width = mainCanvas.width;
+    hlCanvas.height = mainCanvas.height;
+    hlCanvas.style.width = `${plotWidth}px`;
+    hlCanvas.style.height = `${plotHeight}px`;
+    hlCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
+
+    // Hit canvas (off-screen, same physical size)
+    hitCanvas.width = mainCanvas.width;
+    hitCanvas.height = mainCanvas.height;
+    hitCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
+
+    // SVG overlay (covers full container for Y-axis at left)
+    axisSvg.attr('width', rect.width).attr('height', plotHeight);
+
+    redraw();
+    highlightAlloc(highlightedIndex);
+  }
+
+  // ---- select_window (called by MiniMap brush) ----
+  function select_window(stepbegin, stepend, max) {
+    scrubXBegin = stepbegin;
+    scrubXEnd = stepend;
+    scrubYMax = max;
+
+    // Reset zoom transform when minimap brush changes
+    currentTransform = d3.zoomIdentity;
+    d3.select(mainCanvas).call(theZoom.transform, d3.zoomIdentity);
+
+    redraw();
+    highlightAlloc(highlightedIndex);
+  }
+
+  // ---- Delegate (mouse events → ContextViewer) ----
+  function set_delegate(delegate) {
+    // Track pointerdown position to distinguish click vs. drag.
+    // We use pointer events (not mouse events) because d3.zoom captures
+    // pointerdown and may preventDefault, which can suppress mouseup.
+    let pointerDownPos = null;
+    const CLICK_THRESHOLD = 3; // px
+
+    mainCanvas.addEventListener('mousemove', (e) => {
+      // During active zoom/drag, hit canvas may be stale — skip picking
+      if (offscreenDirty) return;
+      const rect = mainCanvas.getBoundingClientRect();
+      const x = e.clientX - rect.left;
+      const y = e.clientY - rect.top;
+      const hit = getDataAtPixel(x, y);
+      if (hit) {
+        delegate.set_selected(hit.index, hit.allocation);
+        highlightAlloc(hit.index);
+      } else {
+        delegate.set_selected(-1, null);
+        highlightAlloc(-1);
+      }
+    });
+
+    mainCanvas.addEventListener('pointerdown', (e) => {
+      pointerDownPos = { x: e.clientX, y: e.clientY };
+    });
+
+    mainCanvas.addEventListener('pointerup', (e) => {
+      if (!pointerDownPos) return;
+      const dx = e.clientX - pointerDownPos.x;
+      const dy = e.clientY - pointerDownPos.y;
+      const dist = Math.sqrt(dx * dx + dy * dy);
+      pointerDownPos = null;
+
+      // Only treat as "click" if mouse barely moved (not a drag/pan)
+      if (dist > CLICK_THRESHOLD) return;
+
+      const rect = mainCanvas.getBoundingClientRect();
+      const x = e.clientX - rect.left;
+      const y = e.clientY - rect.top;
+      const hit = getDataAtPixel(x, y);
+      if (hit) {
+        delegate.default_selected_index = hit.index;
+        delegate.default_selected_alloc = hit.allocation;
+        delegate.set_selected(hit.index, hit.allocation);
+        highlightAlloc(hit.index);
+      } else {
+        delegate.default_selected_index = -1;
+        delegate.default_selected_alloc = null;
+        delegate.set_selected(-1, null);
+        highlightAlloc(-1);
+      }
+    });
+
+    mainCanvas.addEventListener('mouseleave', () => {
+      pointerDownPos = null;
+      delegate.set_selected(
+        delegate.default_selected_index,
+        delegate.default_selected_alloc,
+      );
+      highlightAlloc(delegate.default_selected_index);
+    });
+  }
 
   return {
-    select_window: (stepbegin, stepend, max) => {
-      const begin = xScale(stepbegin);
-      const size = xScale(stepend) - xScale(stepbegin);
-      const scale = plotWidth / size;
-      const translate = -begin;
-      const yscale = maxSize / max;
-      scrubGroup.attr(
-        'transform',
-        `scale(${scale / yscale}, 1) translate(${translate}, 0)`,
-      );
-      plotOuter.call(
-        theZoom.transform,
-        d3.zoomIdentity
-          .scale(yscale)
-          .translate(0, -(plotHeight - plotHeight / yscale)),
-      );
-    },
-    set_delegate: (delegate) => {
-      plot
-        .on('mouseover', function () {
-          delegate.set_selected(d3.select(this));
-        })
-        .on('mousedown', function () {
-          delegate.default_selected = d3.select(this);
-        })
-        .on('mouseleave', function () {
-          delegate.set_selected(delegate.default_selected);
-        });
-    },
+    redraw,
+    resize,
+    select_window,
+    set_delegate,
+    getDataAtPixel,
+    highlightAlloc,
   };
 }
 
@@ -765,10 +1125,10 @@ function escapeHtml(str) {
 
 /**
  * ContextViewer component for showing allocation details.
- * Renders structured HTML into the container div.
+ * Adapted for Canvas: uses allocation index + data object instead of D3 selection.
  */
 function ContextViewer(container, data) {
-  let currentSelected = null;
+  let currentSelectedIndex = -1;
 
   function renderEmpty() {
     const root = container.node();
@@ -794,26 +1154,20 @@ function ContextViewer(container, data) {
   renderEmpty();
 
   return {
-    default_selected: null,
-    set_selected: (d) => {
-      if (currentSelected !== null) {
-        currentSelected.attr('stroke', null).attr('stroke-width', null);
-      }
-      if (d === null) {
+    default_selected_index: -1,
+    default_selected_alloc: null,
+    set_selected: (index, alloc) => {
+      if (index === currentSelectedIndex) return; // skip redundant updates
+      currentSelectedIndex = index;
+
+      if (index < 0 || alloc === null) {
         renderEmpty();
+      } else if (alloc.elem === 'summarized') {
+        renderSummarized();
       } else {
-        const dd = d.datum();
-        if (dd.elem === 'summarized') {
-          renderSummarized();
-        } else {
-          const contextData = data.context_for_id(dd.elem);
-          renderContextContent(container, contextData, dd.elem);
-        }
-        d.attr('stroke', '#6c8cff')
-          .attr('stroke-width', 2)
-          .attr('vector-effect', 'non-scaling-stroke');
+        const contextData = data.context_for_id(alloc.elem);
+        renderContextContent(container, contextData, alloc.elem);
       }
-      currentSelected = d;
     },
   };
 }
@@ -882,12 +1236,12 @@ function MiniMap(miniSvg, plot, data, leftPad, width, height = 70) {
 }
 
 /**
- * Legend component for category colors
+ * Legend component for category colors — rendered as SVG overlay
  */
-function Legend(plotSvg, categories) {
+function Legend(svgGroup, categories) {
   const xstart = 100;
   const ystart = 5;
-  const legendGroup = plotSvg;
+  const legendGroup = svgGroup;
 
   // Semi-transparent background panel
   const bgPadding = 6;
@@ -934,7 +1288,7 @@ function Legend(plotSvg, categories) {
 }
 
 /**
- * Create trace view
+ * Create trace view — main entry point
  */
 export function createTraceView(
   dst,
@@ -947,6 +1301,7 @@ export function createTraceView(
   const data = processAllocData(snapshot, device, plotSegments, maxEntries);
   dst.selectAll('svg').remove();
   dst.selectAll('div').remove();
+  dst.selectAll('canvas').remove();
 
   maxEntries = Math.min(maxEntries, data.elements_length);
   const totalEntries = data.elements_length;
@@ -982,21 +1337,36 @@ export function createTraceView(
     .append('div')
     .attr('class', 'trace-view-grid');
 
+  // ---- Plot container (Canvas-based) ----
   const plotContainer = gridContainer
     .append('div')
     .attr('class', 'trace-plot-container');
-  const plotSvg = plotContainer
-    .append('svg')
-    .attr('display', 'block')
-    .attr('viewBox', '0 0 1024 576')
-    .attr('preserveAspectRatio', 'none');
 
-  const plot = MemoryPlot(plotSvg, data, leftPad, 1024, 576);
+  const plot = MemoryPlot(plotContainer.node(), data, leftPad);
 
+  // Legend as SVG overlay on top of canvas
   if (snapshot.categories.length !== 0) {
-    Legend(plotSvg.append('g').attr('class', 'trace-legend'), snapshot.categories);
+    const legendSvg = d3
+      .select(plotContainer.node())
+      .append('svg')
+      .attr('class', 'trace-legend-overlay')
+      .style('position', 'absolute')
+      .style('top', '0')
+      .style('left', `${leftPad}px`)
+      .style('pointer-events', 'none')
+      .style('overflow', 'visible');
+    Legend(legendSvg.append('g').attr('class', 'trace-legend'), snapshot.categories);
+    // Size the legend SVG to match container
+    const updateLegendSize = () => {
+      const rect = plotContainer.node().getBoundingClientRect();
+      legendSvg.attr('width', rect.width - leftPad).attr('height', rect.height);
+    };
+    updateLegendSize();
+    // Will be updated by ResizeObserver below
+    plot._updateLegendSize = updateLegendSize;
   }
 
+  // ---- Minimap ----
   const minimapContainer = gridContainer
     .append('div')
     .attr('class', 'trace-minimap-container');
@@ -1007,10 +1377,25 @@ export function createTraceView(
     .attr('preserveAspectRatio', 'none');
 
   MiniMap(miniSvg, plot, data, leftPad, 1024);
+
+  // ---- Context panel ----
   const contextDiv = gridContainer
     .append('div')
     .attr('class', 'trace-context-panel');
   const contextContainer = contextDiv.append('div').attr('class', 'ctx-root');
   const delegate = ContextViewer(contextContainer, data);
   plot.set_delegate(delegate);
+
+  // ---- ResizeObserver ----
+  const ro = new ResizeObserver(() => {
+    plot.resize();
+    if (plot._updateLegendSize) plot._updateLegendSize();
+  });
+  ro.observe(plotContainer.node());
+
+  // Initial sizing (after DOM is attached)
+  requestAnimationFrame(() => {
+    plot.resize();
+    if (plot._updateLegendSize) plot._updateLegendSize();
+  });
 }
