@@ -319,6 +319,9 @@ function MemoryPlot(container, data, leftPad, colors = schemeTableau10) {
   const maxTimestep = data.max_at_time.length;
   const maxSize = data.max_size;
 
+  // Vertical padding (px) so top/bottom Y-axis tick labels are not clipped
+  const yPad = 8;
+
   // ---- Scales (pixel ranges updated on resize) ----
   const xScale = d3.scaleLinear().domain([0, maxTimestep]);
   const yScale = d3.scaleLinear().domain([0, maxSize]);
@@ -331,13 +334,13 @@ function MemoryPlot(container, data, leftPad, colors = schemeTableau10) {
 
   // Main canvas (data polygons)
   const mainCanvas = document.createElement('canvas');
-  mainCanvas.style.cssText = `position:absolute;top:0;left:${leftPad}px;`;
+  mainCanvas.style.cssText = `position:absolute;top:${yPad}px;left:${leftPad}px;`;
   wrapper.appendChild(mainCanvas);
   const mainCtx = mainCanvas.getContext('2d');
 
   // Highlight canvas (selection overlay)
   const hlCanvas = document.createElement('canvas');
-  hlCanvas.style.cssText = `position:absolute;top:0;left:${leftPad}px;pointer-events:none;`;
+  hlCanvas.style.cssText = `position:absolute;top:${yPad}px;left:${leftPad}px;pointer-events:none;`;
   wrapper.appendChild(hlCanvas);
   const hlCtx = hlCanvas.getContext('2d');
 
@@ -498,7 +501,7 @@ function MemoryPlot(container, data, leftPad, colors = schemeTableau10) {
     const axisScale = d3
       .scaleLinear()
       .domain(ey.domain())
-      .range([h / dpr, 0]);
+      .range([h / dpr + yPad, yPad]);
     axisGroup.call(yAxis.scale(axisScale));
 
     // --- Clear highlight ---
@@ -554,7 +557,7 @@ function MemoryPlot(container, data, leftPad, colors = schemeTableau10) {
     const axisScale = d3
       .scaleLinear()
       .domain(ey.domain())
-      .range([h / dpr, 0]);
+      .range([h / dpr + yPad, yPad]);
     axisGroup.call(yAxis.scale(axisScale));
   }
 
@@ -642,7 +645,7 @@ function MemoryPlot(container, data, leftPad, colors = schemeTableau10) {
   function resize() {
     const rect = wrapper.getBoundingClientRect();
     const plotWidth = rect.width - leftPad;
-    const plotHeight = rect.height;
+    const plotHeight = rect.height - yPad * 2; // reserve top/bottom padding for Y-axis labels
     if (plotWidth <= 0 || plotHeight <= 0) return;
 
     const dpr = window.devicePixelRatio || 1;
@@ -671,7 +674,7 @@ function MemoryPlot(container, data, leftPad, colors = schemeTableau10) {
     hitCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
 
     // SVG overlay (covers full container for Y-axis at left)
-    axisSvg.attr('width', rect.width).attr('height', plotHeight);
+    axisSvg.attr('width', rect.width).attr('height', rect.height);
 
     redraw();
     highlightAlloc(highlightedIndex);
@@ -1175,13 +1178,12 @@ function ContextViewer(container, data) {
 /**
  * MiniMap component for timeline navigation
  */
-function MiniMap(miniSvg, plot, data, leftPad, width, height = 70) {
+function MiniMap(miniSvg, plot, data, width, height = 60) {
   const maxAtTime = data.max_at_time;
-  const plotWidth = width - leftPad;
   const yScale = d3.scaleLinear().domain([0, data.max_size]).range([height, 0]);
   const miniXScale = d3.scaleLinear()
     .domain([0, maxAtTime.length])
-    .range([leftPad, width]);
+    .range([0, width]);
 
   const miniPoints = [
     [maxAtTime.length, 0],
@@ -1207,15 +1209,15 @@ function MiniMap(miniSvg, plot, data, leftPad, width, height = 70) {
 
   const xScale = d3.scaleLinear()
     .domain([0, maxAtTime.length])
-    .range([0, plotWidth]);
+    .range([0, width]);
 
   const brush = d3.brushX();
   brush.extent([
-    [leftPad, 0],
+    [0, 0],
     [width, height],
   ]);
   brush.on('brush', function (event) {
-    const [begin, end] = event.selection.map((x) => x - leftPad);
+    const [begin, end] = event.selection;
 
     const stepbegin = Math.floor(xScale.invert(begin));
     const stepend = Math.floor(xScale.invert(end));
@@ -1369,14 +1371,15 @@ export function createTraceView(
   // ---- Minimap ----
   const minimapContainer = gridContainer
     .append('div')
-    .attr('class', 'trace-minimap-container');
+    .attr('class', 'trace-minimap-container')
+    .style('padding-left', `${leftPad}px`);
   const miniSvg = minimapContainer
     .append('svg')
     .attr('display', 'block')
     .attr('viewBox', '0 0 1024 60')
     .attr('preserveAspectRatio', 'none');
 
-  MiniMap(miniSvg, plot, data, leftPad, 1024);
+  MiniMap(miniSvg, plot, data, 1024);
 
   // ---- Context panel ----
   const contextDiv = gridContainer
