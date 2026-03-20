@@ -344,10 +344,6 @@ function MemoryPlot(container, data, leftPad, colors = schemeTableau10) {
   wrapper.appendChild(hlCanvas);
   const hlCtx = hlCanvas.getContext('2d');
 
-  // Hit canvas (off-screen, for color-coded picking)
-  const hitCanvas = document.createElement('canvas');
-  const hitCtx = hitCanvas.getContext('2d', { willReadFrequently: true });
-
   // SVG overlay for Y-axis (positioned at left:0)
   const axisSvg = d3
     .select(wrapper)
@@ -360,22 +356,6 @@ function MemoryPlot(container, data, leftPad, colors = schemeTableau10) {
 
   const axisGroup = axisSvg.append('g').attr('transform', `translate(${leftPad}, 0)`);
   const yAxis = d3.axisLeft(yScale).tickFormat((d) => formatSize(d, false));
-
-  // ---- Hit-canvas color encoding ----
-  // Allocation index → unique RGB color. Index 0 → rgb(0,0,1), etc.
-  // Background is rgb(0,0,0) → means "no allocation".
-  function indexToColor(i) {
-    const id = i + 1; // reserve 0 for background
-    const r = (id >> 16) & 0xff;
-    const g = (id >> 8) & 0xff;
-    const b = id & 0xff;
-    return `rgb(${r},${g},${b})`;
-  }
-
-  function colorToIndex(r, g, b) {
-    if (r === 0 && g === 0 && b === 0) return -1; // background
-    return ((r << 16) | (g << 8) | b) - 1;
-  }
 
   // ---- Precompute polygon path data for each allocation ----
   // Each allocation has { xs: number[], bottomYs: number[], topYs: number[] }
@@ -397,6 +377,7 @@ function MemoryPlot(container, data, leftPad, colors = schemeTableau10) {
   const offMainCtx = offMainCanvas.getContext('2d');
   const offHitCanvas = document.createElement('canvas');
   const offHitCtx = offHitCanvas.getContext('2d', { willReadFrequently: true });
+  offHitCtx.imageSmoothingEnabled = false;
 
   // ---- Current transform state (from d3.zoom and minimap brush) ----
   let currentTransform = d3.zoomIdentity;
@@ -463,9 +444,14 @@ function MemoryPlot(container, data, leftPad, colors = schemeTableau10) {
     offMainCanvas.height = h;
     offMainCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
 
-    offHitCanvas.width = w;
-    offHitCanvas.height = h;
-    offHitCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    // Hit canvas uses 1x resolution (no DPR scaling) so that thin polygons
+    // still occupy at least 1 pixel tall. This drastically reduces
+    // anti-aliasing artifacts that corrupt the color-coded index picking.
+    const hitW = Math.round(w / dpr);
+    const hitH = Math.round(h / dpr);
+    offHitCanvas.width = hitW;
+    offHitCanvas.height = hitH;
+    offHitCtx.setTransform(1, 0, 0, 1, 0, 0);
 
     // --- Offscreen main canvas ---
     offMainCtx.clearRect(0, 0, w, h);
@@ -477,25 +463,10 @@ function MemoryPlot(container, data, leftPad, colors = schemeTableau10) {
       offMainCtx.fill();
     }
 
-    // --- Offscreen hit canvas ---
-    offHitCtx.clearRect(0, 0, w, h);
-    for (let i = 0; i < allocations.length; i++) {
-      drawPolygon(offHitCtx, pathCache[i], ex, ey);
-      offHitCtx.fillStyle = indexToColor(i);
-      offHitCtx.fill();
-    }
-
     offscreenDirty = false;
 
     // Blit offscreen → on-screen
     blitToScreen();
-
-    // --- Sync hit canvas (on-screen copy for pixel picking) ---
-    hitCtx.save();
-    hitCtx.setTransform(1, 0, 0, 1, 0, 0);
-    hitCtx.clearRect(0, 0, w, h);
-    hitCtx.drawImage(offHitCanvas, 0, 0);
-    hitCtx.restore();
 
     // --- Y-axis SVG ---
     const axisScale = d3
@@ -603,21 +574,67 @@ function MemoryPlot(container, data, leftPad, colors = schemeTableau10) {
   }
 
   // ---- Pixel → allocation lookup ----
+  /**
+   * Look up which allocation (if any) sits at a given canvas-space pixel.
+   *
+   * Uses **geometric search** in data space: convert the pixel coordinate to
+   * data-space (timestep, byte-offset) via the inverse of the current scales,
+   * then scan allocations to find one whose [bottomY, topY] range at that
+   * timestep contains the target byte-offset.
+   *
+   * This approach is immune to Canvas 2D anti-aliasing artefacts that plague
+   * colour-coded hit-canvas picking when thousands of thin polygons overlap.
+   */
   function getDataAtPixel(canvasX, canvasY) {
-    // If offscreen is dirty (zoom in progress), sync hit canvas first
+    // If offscreen is dirty (zoom in progress), re-render first
     if (offscreenDirty) {
       zoomTransformAtRender = currentTransform;
       vectorRedraw();
       highlightAlloc(highlightedIndex);
     }
-    const dpr = window.devicePixelRatio || 1;
-    const px = Math.round(canvasX * dpr);
-    const py = Math.round(canvasY * dpr);
-    if (px < 0 || py < 0 || px >= hitCanvas.width || py >= hitCanvas.height) return null;
-    const pixel = hitCtx.getImageData(px, py, 1, 1).data;
-    const idx = colorToIndex(pixel[0], pixel[1], pixel[2]);
-    if (idx < 0 || idx >= allocations.length) return null;
-    return { index: idx, allocation: allocations[idx] };
+
+    const ex = effectiveXScale();
+    const ey = effectiveYScale();
+
+    // Convert pixel → data space
+    const dataX = ex.invert(canvasX);   // timestep (float)
+    const dataY = ey.invert(canvasY);   // byte-offset (float)
+
+    if (dataY < 0) return null;
+
+    // Search allocations in *reverse* draw order (top-most first) so that the
+    // visually top-most polygon wins when polygons share a boundary pixel.
+    for (let i = allocations.length - 1; i >= 0; i--) {
+      const p = pathCache[i];
+      const xs = p.xs;
+      const n = xs.length;
+      if (n === 0) continue;
+
+      // Quick range check on X (timestep)
+      if (dataX < xs[0] || dataX > xs[n - 1]) continue;
+
+      // Binary search for the segment [xs[j], xs[j+1]] containing dataX
+      let lo = 0, hi = n - 2;
+      while (lo <= hi) {
+        const mid = (lo + hi) >> 1;
+        if (dataX < xs[mid]) hi = mid - 1;
+        else if (dataX > xs[mid + 1]) lo = mid + 1;
+        else { lo = mid; break; }
+      }
+      const j = lo;
+      if (j >= n - 1) continue;
+
+      // Linearly interpolate bottomY and topY at dataX within [xs[j], xs[j+1]]
+      const t = xs[j + 1] === xs[j] ? 0 : (dataX - xs[j]) / (xs[j + 1] - xs[j]);
+      const bot = p.bottomYs[j] + t * (p.bottomYs[j + 1] - p.bottomYs[j]);
+      const top = p.topYs[j] + t * (p.topYs[j + 1] - p.topYs[j]);
+
+      if (dataY >= bot && dataY <= top) {
+        return { index: i, allocation: allocations[i] };
+      }
+    }
+
+    return null;
   }
 
   // ---- Zoom (O(1) blit during interaction, deferred vector redraw) ----
@@ -667,11 +684,6 @@ function MemoryPlot(container, data, leftPad, colors = schemeTableau10) {
     hlCanvas.style.width = `${plotWidth}px`;
     hlCanvas.style.height = `${plotHeight}px`;
     hlCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
-
-    // Hit canvas (off-screen, same physical size)
-    hitCanvas.width = mainCanvas.width;
-    hitCanvas.height = mainCanvas.height;
-    hitCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
 
     // SVG overlay (covers full container for Y-axis at left)
     axisSvg.attr('width', rect.width).attr('height', rect.height);
