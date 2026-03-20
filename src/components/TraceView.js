@@ -314,7 +314,7 @@ function processAllocData(snapshot, device, plotSegments, maxEntries) {
  *
  * @returns {{ redraw, select_window, set_delegate, resize, getDataAtPixel }}
  */
-function MemoryPlot(container, data, leftPad, colors = schemeTableau10) {
+function MemoryPlot(container, data, leftPad, rightPad = 0, colors = schemeTableau10) {
   const allocations = data.allocations_over_time;
   const maxTimestep = data.max_at_time.length;
   const maxSize = data.max_size;
@@ -661,7 +661,7 @@ function MemoryPlot(container, data, leftPad, colors = schemeTableau10) {
   // ---- Resize ----
   function resize() {
     const rect = wrapper.getBoundingClientRect();
-    const plotWidth = rect.width - leftPad;
+    const plotWidth = rect.width - leftPad - rightPad;
     const plotHeight = rect.height - yPad * 2; // reserve top/bottom padding for Y-axis labels
     if (plotWidth <= 0 || plotHeight <= 0) return;
 
@@ -1312,6 +1312,7 @@ export function createTraceView(
   maxEntries = 15000,
 ) {
   const leftPad = 70;
+  const rightPad = 8;
   const data = processAllocData(snapshot, device, plotSegments, maxEntries);
   dst.selectAll('svg').remove();
   dst.selectAll('div').remove();
@@ -1356,7 +1357,7 @@ export function createTraceView(
     .append('div')
     .attr('class', 'trace-plot-container');
 
-  const plot = MemoryPlot(plotContainer.node(), data, leftPad);
+  const plot = MemoryPlot(plotContainer.node(), data, leftPad, rightPad);
 
   // Legend as SVG overlay on top of canvas
   if (snapshot.categories.length !== 0) {
@@ -1384,7 +1385,8 @@ export function createTraceView(
   const minimapContainer = gridContainer
     .append('div')
     .attr('class', 'trace-minimap-container')
-    .style('padding-left', `${leftPad}px`);
+    .style('padding-left', `${leftPad}px`)
+    .style('padding-right', `${rightPad}px`);
   const miniSvg = minimapContainer
     .append('svg')
     .attr('display', 'block')
